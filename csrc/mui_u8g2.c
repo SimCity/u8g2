@@ -2241,3 +2241,247 @@ uint8_t mui_u8g2_u16_list_goto_w1_pi(mui_t *ui, uint8_t msg)
   }
   return 0;
 }
+
+//extend normal valid characters to allow a character that will be used to represent delete
+static uint8_t mui_is_valid_edit_char(uint8_t c) MUI_NOINLINE;
+uint8_t mui_is_valid_edit_char(uint8_t c)
+{
+  if ( c == '<' )
+    return 1;
+  return mui_is_valid_char(c);
+}
+
+//manage drawing string based onvalue stored in is_mud. when false, draw as a normal button
+//wehn true, draw the string as individual characters wiht teh complete button and a select 
+//box around what character is being selected/edited
+static void mui_u8g2_string_draw_wm(mui_t *ui, uint8_t msg)
+{
+  u8g2_t *u8g2 = mui_get_U8g2(ui);
+  char *value = (char *)muif_get_data(ui->uif);
+  char buf[ui->arg+1];
+  uint8_t pos = ui->token[0];
+  u8g2_uint_t flags = U8G2_BTN_INV;
+  int8_t char_width = u8g2_GetMaxCharWidth(u8g2);
+  u8g2_uint_t x = mui_get_x(ui);
+  u8g2_uint_t y = mui_get_y(ui); 
+  uint8_t display_pos = ui->form_scroll_top;
+  switch (ui->is_mud)
+  {
+    case 1:
+      flags = 0;
+    case 2:
+      for(uint8_t i = 0; i <= ui->form_scroll_visible ; i++)
+      {
+        if(i+ui->form_scroll_top == ui->form_scroll_total)
+        {
+          u8g2_DrawUTF8(u8g2, x + char_width*ui->form_scroll_visible, y, "✔");
+        }
+        else
+        {
+          while (mui_is_valid_char(value[i + ui->form_scroll_top]) == 0)
+            value[i + ui->form_scroll_top]++;
+          buf[0] = value[i + ui->form_scroll_top];
+          buf[1] = '\0';
+          u8g2_DrawUTF8(u8g2, x + char_width*i, y, buf);
+        }
+        if(i+ui->form_scroll_top == pos)
+          u8g2_DrawButtonFrame(u8g2, x + char_width*i, y, flags, u8g2_GetDisplayWidth(u8g2), 0, MUI_U8G2_V_PADDING);
+      }
+      break;
+    default:
+      strncpy(buf,value,ui->arg);
+      mui_u8g2_draw_button_pi(ui, u8g2_GetStrWidth(u8g2, value) + 1, 1, buf);
+      break;
+  }
+}
+
+
+//creates a field that allows a string to be the variable being edited. 
+//based on the character field code and list field code, this allows you 
+//to select the string, and then seect individual characters to modify, add or delete.
+//first pres of select, changes mode to mud and displays the string as individual 
+//character fields wiht a button to change back.
+//the second select press will change into edint the selected character. 
+//at which point next and previous will loop through valid characters
+//
+//note, this uses is_mud not as a boolean but as a tristate to handle the 3 modes teh field can be in.
+//also, this uses teh fields ised by teh jump list and child forms fields but these only work if tehy are
+//the only field so this should never be an issue
+static void mui_u8g2_string_draw_wm(mui_t *ui, uint8_t msg)
+{
+  u8g2_t *u8g2 = mui_get_U8g2(ui);
+  mui_u8g2_strting_t *string_data = (mui_u8g2_strting_t *)muif_get_data(ui->uif);
+
+  char buf[ui->arg+1];
+  uint8_t pos = ui->token[0];
+  u8g2_uint_t flags = U8G2_BTN_INV;
+  int8_t char_width = u8g2_GetMaxCharWidth(u8g2);
+  u8g2_uint_t x = mui_get_x(ui); // if mui_GetSelectableFieldTextOption is called, then field vars are overwritten, so get the value
+  u8g2_uint_t y = mui_get_y(ui); // if mui_GetSelectableFieldTextOption is called, then field vars are overwritten, so get the value
+  uint8_t display_pos = ui->form_scroll_top;
+  switch (ui->is_mud)
+  {
+    case 1:
+      flags = 0;
+    case 2:
+      for(uint8_t i = 0; i <= ui->form_scroll_visible ; i++)
+      {
+        if(i+ui->form_scroll_top == ui->form_scroll_total)
+        {
+          u8g2_DrawUTF8(u8g2, x + char_width*ui->form_scroll_visible, y, "✔");
+        }
+        else
+        {
+          while (mui_is_valid_char(string_data->value[i + ui->form_scroll_top]) == 0)
+            string_data->value[i + ui->form_scroll_top]++;
+          buf[0] = string_data->value[i + ui->form_scroll_top];
+          buf[1] = '\0';
+          u8g2_DrawUTF8(u8g2, x + char_width*i, y, buf);
+        }
+        if(i+ui->form_scroll_top == pos)
+          u8g2_DrawButtonFrame(u8g2, x + char_width*i, y, flags, u8g2_GetDisplayWidth(u8g2), 0, MUI_U8G2_V_PADDING);
+      }
+      break;
+    default:
+      strncpy(buf,string_data->value,ui->arg);
+      mui_u8g2_draw_button_pi(ui, u8g2_GetStrWidth(u8g2, string_data->value) + 1, 1, buf);
+      break;
+  }
+}
+
+uint8_t mui_u8g2_string_wm_mud_pi(mui_t *ui, uint8_t msg)
+{
+  // ui->dflags                          MUIF_DFLAG_IS_CURSOR_FOCUS       MUIF_DFLAG_IS_TOUCH_FOCUS
+  // mui_get_cflags(ui->uif)       MUIF_CFLAG_IS_CURSOR_SELECTABLE
+  u8g2_t *u8g2 = mui_get_U8g2(ui);
+  mui_u8g2_strting_t *string_data = (mui_u8g2_strting_t *)muif_get_data(ui->uif);
+  uint8_t arg = ui->arg;
+  int pos = (int)ui->token;
+  uint8_t char_width = u8g2_GetMaxCharWidth(u8g2);
+  char buf[6];
+  switch (msg)
+  {
+  case MUIF_MSG_DRAW:
+    mui_u8g2_string_draw_wm(ui, msg);
+    break;
+  case MUIF_MSG_FORM_START:
+    break;
+  case MUIF_MSG_FORM_END:
+    break;
+  case MUIF_MSG_CURSOR_ENTER:
+    break;
+  case MUIF_MSG_CURSOR_SELECT:
+  case MUIF_MSG_VALUE_INCREMENT:
+  case MUIF_MSG_VALUE_DECREMENT:
+    switch (ui->is_mud)
+    {
+      case 1:
+        //if the last position is selected, tehn editiing is done, exit and clean up
+        if(pos == strlen(string_data->value))
+        {
+          ui->is_mud = 0;
+          ui->form_scroll_total = 0;
+          ui->form_scroll_visible = 0;
+          ui->form_scroll_top = 0;
+          ui->token = 0;
+          string_data->value[strlen(string_data->value) - 1] = '\0';
+        }
+        //else enter character edit mode
+        else
+        {
+          ui->is_mud = 2;
+        }
+        break;
+      case 2:
+        //if characcter is set tot eh delete symbol. delete this character from the string.
+        //by shifting teh remaining characters over by one using a copy
+        if(string_data->value[pos] == '<')
+        {
+          strcpy(string_data->value+pos, string_data->value + pos +1);
+          ui->form_scroll_total = strlen(string_data->value)+1;
+        }
+        //if we are updating the last character, add a new space to teh end to allow a new character to be added
+        //this will be trimmed on exit
+        if(pos == ui->form_scroll_total - 2 && strlen(string_data->value) < string_data->max_length)
+        {
+          strcat(string_data->value," ");
+          ui->form_scroll_total = strlen(string_data->value)+1;
+        }
+        //exit character edit mode
+        ui->is_mud = 1;
+        break;
+      default:
+        ui->is_mud = 1;
+        strcat(string_data->value," ");
+        ui->form_scroll_total = strlen(string_data->value)+1;
+        ui->form_scroll_visible = arg+1;
+        break;
+    }
+    break;
+  case MUIF_MSG_CURSOR_LEAVE:
+    break;
+  case MUIF_MSG_TOUCH_DOWN:
+    break;
+  case MUIF_MSG_TOUCH_UP:
+    break;
+  case MUIF_MSG_EVENT_NEXT:
+    switch (ui->is_mud)
+    {
+      case 1:
+        if(pos < strlen(string_data->value))
+        {
+          pos++;
+          ui->token = (fds_t *)pos;
+        }
+        if ( pos+1 >= ui->form_scroll_visible )
+        {
+          if ( ui->form_scroll_visible + ui->form_scroll_top < ui->form_scroll_total )
+          {
+            ui->form_scroll_top++;
+          }
+        }
+        return 1;
+      case 2:
+        do
+        {
+          string_data->value[pos]++;
+        } while (mui_is_valid_edit_char(string_data->value[pos]) == 0);
+        return 1;
+      default:
+        break;
+    }
+    break;
+  case MUIF_MSG_EVENT_PREV:
+    switch (ui->is_mud)
+    {
+      case 1:
+       
+        if(pos != 0)
+        {
+          pos--;
+          ui->token = (fds_t *)pos;
+        }
+        if ( pos-1 <= ui->form_scroll_top )
+        {
+          if ( ui->form_scroll_top > 0 )
+          {
+            ui->form_scroll_top--;
+          }
+        }
+        return 1;
+      case 2:
+        do
+        {
+          string_data->value[pos]--;
+        } while (mui_is_valid_edit_char(string_data->value[pos]) == 0);
+        return 1;
+      default:
+        break;
+    }
+  }
+  return 0;
+}
+
+
+
+
