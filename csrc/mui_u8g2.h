@@ -77,6 +77,22 @@ extern "C" {
 
 #define MUI_U8G2_COMMA ,
 
+struct mui_u8g2_string_struct
+{
+  char *value;
+  uint8_t max_length;
+} MUI_PROGMEM;
+
+typedef const struct mui_u8g2_string_struct mui_u8g2_strting_t;
+
+#if defined(__GNUC__) && defined(__AVR__)
+#  define mui_u8g2_strting_get_max_length(strn) mui_pgm_read(&((strn)->max_length))
+#  define mui_u8g2_strting_get_valptr(strn) ((uint8_t *)mui_pgm_wread(&((strn)->value)))
+#else
+#  define mui_u8g2_strting_get_max_length(strn) ((u8mm)->max_length)
+#  define mui_u8g2_strting_get_valptr(strn) ((strn)->value)
+#endif
+
 typedef const char * (*mui_u8g2_get_list_element_cb)(void *data, uint16_t index);
 typedef uint16_t (*mui_u8g2_get_list_count_cb)(void *data);
 
@@ -297,6 +313,17 @@ uint8_t mui_u8g2_u16_list_parent_wm_pi(mui_t *ui, uint8_t msg);     /* GIF, MUIF
 uint8_t mui_u8g2_u16_list_child_w1_pi(mui_t *ui, uint8_t msg);      /* GIF, MUIF_U8G2_U16_LIST, MUI_XYA, arg=sub element number */
 uint8_t mui_u8g2_u16_list_goto_w1_pi(mui_t *ui, uint8_t msg);               /* REF, MUIF_U8G2_U16_LIST first char of the string denotes the target form */
 
+
+/*===== data = mui_u8g2_string_t*  =====*/
+/* data required to define a char array */
+
+#define MUIF_U8G2_STRING(id, valptr, maxLength, muif) \
+  MUIF(id, MUIF_CFLAG_IS_CURSOR_SELECTABLE,  \
+  (void *)((mui_u8g2_string_t [] ) {{ (valptr) MUI_U8G2_COMMA (maxLength)}}), \
+  (muif))
+
+/* string editing field */
+uint8_t mui_u8g2_string_wm_mud_pi(mui_t *ui, uint8_t msg);   
 
 #ifdef __cplusplus
 }
