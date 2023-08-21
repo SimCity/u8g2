@@ -66,7 +66,9 @@
 #define MUI_U8G2_H
 
 #include "mui.h"
+#include <Arduino.h>
 
+#define MUI_DEBUG(...) printf(__VA_ARGS__); 
 /*==========================================*/
 /* C++ compatible */
 
@@ -79,8 +81,9 @@ extern "C" {
 
 struct mui_u8g2_string_struct
 {
-  char *value;
   uint8_t max_length;
+  uint8_t flags;
+    char *value;
 } MUI_PROGMEM;
 
 typedef const struct mui_u8g2_string_struct mui_u8g2_string_t;
@@ -88,9 +91,12 @@ typedef const struct mui_u8g2_string_struct mui_u8g2_string_t;
 #if defined(__GNUC__) && defined(__AVR__)
 #  define mui_u8g2_string_get_max_length(strn) mui_pgm_read(&((strn)->max_length))
 #  define mui_u8g2_string_get_valptr(strn) ((uint8_t *)mui_pgm_wread(&((strn)->value)))
+#  define mui_u8g2_string_get_flags(strn) mui_pgm_read(&((strn)->flags))
 #else
 #  define mui_u8g2_string_get_max_length(strn) ((strn)->max_length)
 #  define mui_u8g2_string_get_valptr(strn) ((strn)->value)
+#  define mui_u8g2_string_get_flags(strn) ((strn)->flags)
+
 #endif
 
 typedef const char * (*mui_u8g2_get_list_element_cb)(void *data, uint16_t index);
@@ -317,13 +323,35 @@ uint8_t mui_u8g2_u16_list_goto_w1_pi(mui_t *ui, uint8_t msg);               /* R
 /*===== data = mui_u8g2_string_t*  =====*/
 /* data required to define a char array */
 
-#define MUIF_U8G2_STRING(id, valptr, maxLength, muif) \
+#define MUIF_U8G2_STRING(id, valptr, maxLength, flags, muif) \
   MUIF(id, MUIF_CFLAG_IS_CURSOR_SELECTABLE,  \
-  (void *)((mui_u8g2_string_t ) { (valptr) MUI_U8G2_COMMA (maxLength)}), \
+  (void *)((mui_u8g2_string_t [] ) {{ (maxLength) MUI_U8G2_COMMA (flags) MUI_U8G2_COMMA (valptr)}}), \
   (muif))
+
+/* list of bit values for the "flags" variable */
+#define MUI_STRING_LOWER_CASE 0x01
+#define MUI_STRING_UPPER_CASE 0x02
+#define MUI_STRING_ALPHA (MUI_STRING_LOWER_CASE | MUI_STRING_UPPER_CASE)
+#define MUI_STRING_DIGITS 0x04
+#define MUI_STRING_ALPHA_DIGITS (MUI_STRING_ALPHA | MUI_STRING_ALPHA_DIGITS)
+#define MUI_STRING_RESTRICTED_SPECIAL_CHARACTERS 0x08
+#define MUI_STRING_EXTENDED_SPECIAL_CHARACTERS 0x10
+#define MUI_STRING_SPECIAL_CHARACTERS (MUI_STRING_RESTRICTED_SPECIAL_CHARACTERS | MUI_STRING_EXTENDED_SPECIAL_CHARACTERS)
+#define MUI_STRING_ALL_CHARACTERS 0xFF
+
+#define MUI_STRING_DIGITS_START 0x30
+#define MUI_STRING_LOWER_CASE_START 0x61
+#define MUI_STRING_UPPER_CASE_START 0x41
+#define MUI_STRING_PRINTABLE_CHARACTERS_START 0x20
+
+
+#define MUI_STRING_DELETE 0xAB
+#define MUI_STRING_ENTER 0xBB
 
 /* string editing field */
 uint8_t mui_u8g2_string_wm_mud_pi(mui_t *ui, uint8_t msg);   
+
+
 
 #ifdef __cplusplus
 }
