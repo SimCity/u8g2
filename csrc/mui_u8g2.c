@@ -2231,6 +2231,7 @@ uint8_t mui_u8g2_u16_list_goto_w1_pi(mui_t *ui, uint8_t msg)
     case MUIF_MSG_CURSOR_SELECT:
     case MUIF_MSG_VALUE_INCREMENT:
     case MUIF_MSG_VALUE_DECREMENT:
+
       if ( selection != NULL )
         *selection = pos;
       mui_SaveCursorPosition(ui, pos >= 255 ? 0 : pos);     // store the current cursor position, so that the user can jump back to the corresponding cursor position
@@ -2242,13 +2243,42 @@ uint8_t mui_u8g2_u16_list_goto_w1_pi(mui_t *ui, uint8_t msg)
   return 0;
 }
 
+
+
 //extend normal valid characters to allow a character that will be used to represent delete
-static uint8_t mui_is_valid_edit_char(uint8_t c) MUI_NOINLINE;
-uint8_t mui_is_valid_edit_char(uint8_t c)
+static uint8_t mui_is_valid_edit_char(uint8_t c, uint8_t flags) MUI_NOINLINE;
+uint8_t mui_is_valid_edit_char(uint8_t c, uint8_t flags)
 {
-  if ( c == '<' )
+  //always allow the delete character
+
+  if ( c == MUI_STRING_DELETE )
     return 1;
-  return mui_is_valid_char(c);
+  //always allow a space
+  if ( c == ' ' )
+    return 1;
+  if ( (flags & MUI_STRING_DIGITS) && c >= MUI_STRING_DIGITS_START && c <= MUI_STRING_DIGITS_START + 9 )
+    return 1;
+  if ( (flags & MUI_STRING_LOWER_CASE) && c >= MUI_STRING_LOWER_CASE_START && c <= MUI_STRING_LOWER_CASE_START + 25 )
+    return 1;
+  if ( (flags & MUI_STRING_UPPER_CASE) && c >= MUI_STRING_UPPER_CASE_START && c <= MUI_STRING_UPPER_CASE_START + 25 )
+    return 1;
+  if ( (flags & MUI_STRING_RESTRICTED_SPECIAL_CHARACTERS) && c >= MUI_STRING_PRINTABLE_CHARACTERS_START+1 && c <= MUI_STRING_PRINTABLE_CHARACTERS_START + 15 )
+    return 1;
+  if ( (flags & MUI_STRING_EXTENDED_SPECIAL_CHARACTERS) && c >= MUI_STRING_DIGITS_START + 10 && c <= MUI_STRING_DIGITS_START + 16 )
+    return 1;
+  if ( (flags & MUI_STRING_EXTENDED_SPECIAL_CHARACTERS) && c >= MUI_STRING_UPPER_CASE_START + 26 && c <= MUI_STRING_UPPER_CASE_START + 31 )
+    return 1;
+  if ( (flags & MUI_STRING_EXTENDED_SPECIAL_CHARACTERS) && c >= MUI_STRING_LOWER_CASE_START + 26 && c <= MUI_STRING_LOWER_CASE_START + 29 )
+    return 1;
+  return 0;
+}
+
+static void mui_get_max_display_characters(mui_t *ui)
+{
+  u8g2_t *u8g2 = mui_get_U8g2(ui);
+  if(!ui->arg)
+    ui->arg = (u8g2_GetDisplayWidth(u8g2)-mui_get_x(ui))/u8g2_GetMaxCharWidth(u8g2);
+
 }
 
 //manage drawing string based onvalue stored in is_mud. when false, draw as a normal button
@@ -2260,40 +2290,62 @@ static void mui_u8g2_string_draw_wm(mui_t *ui)
 {
   u8g2_t *u8g2 = mui_get_U8g2(ui);
   mui_u8g2_string_t *string_data = (mui_u8g2_string_t *)muif_get_data(ui->uif);
-  char *value = mui_u8g2_strting_get_valptr(string_data);
-  char buf[ui->arg+1];
-  uint8_t pos = ui->token[0];
-  u8g2_uint_t flags = U8G2_BTN_INV;
-  int8_t char_width = u8g2_GetMaxCharWidth(u8g2);
-  u8g2_uint_t x = mui_get_x(ui); // if mui_GetSelectableFieldTextOption is called, then field vars are overwritten, so get the value
-  u8g2_uint_t y = mui_get_y(ui); // if mui_GetSelectableFieldTextOption is called, then field vars are overwritten, so get the value
-  uint8_t display_pos = ui->form_scroll_top;
+  char *value = (char *)mui_u8g2_string_get_valptr(string_data);
+    uint8_t string_flags = mui_u8g2_string_get_flags(string_data);
+  int pos = (int)ui->token;
+  u8g2_uint_t draw_flags = 1;
+
+  char buf[ui->arg + 5];
+
   switch (ui->is_mud)
   {
     case 1:
-      flags = 0;
+      //when selcting character, display in invert mode
+      draw_flags |= U8G2_BTN_INV;
     case 2:
-      for(uint8_t i = 0; i <= ui->form_scroll_visible ; i++)
-      {
-        if(i+ui->form_scroll_top == ui->form_scroll_total)
+      if(mui_IsCursorFocus(ui))
+      {     
+        u8g2_uint_t x = mui_get_x(ui); // if mui_GetSelectableFieldTextOption is called, then field vars are overwritten, so get the value
+        u8g2_uint_t y = mui_get_y(ui); // if mui_GetSelectableFieldTextOption is called, then field vars are overwritten, so get the value
+        uint8_t xOffset = 0;
+
+        //in edit mode, draw each character separately so control over select position and character changes can be performed
+        for(uint8_t i = ui->form_scroll_top; i <= ui->form_scroll_visible && i <= ui->form_scroll_total ; i++)
         {
-          u8g2_DrawUTF8(u8g2, x + char_width*ui->form_scroll_visible, y, "✔");
-        }
-        else
-        {
-          while (mui_is_valid_char(value[i + ui->form_scroll_top]) == 0)
-            value[i + ui->form_scroll_top]++;
-          buf[0] = value[i + ui->form_scroll_top];
-          buf[1] = '\0';
-          u8g2_DrawUTF8(u8g2, x + char_width*i, y, buf);
-        }
-        if(i+ui->form_scroll_top == pos)
-          u8g2_DrawButtonFrame(u8g2, x + char_width*i, y, flags, u8g2_GetDisplayWidth(u8g2), 0, MUI_U8G2_V_PADDING);
+          //display teh null pointer as the OK button to finish editing
+          if(i == ui->form_scroll_total)
+          {
+            buf[0] = MUI_STRING_ENTER;
+            buf[1] = '\0'; 
+            
+          }
+          else
+          {
+            //otherwise, its a character in teh string, so make sure its a valid character to draw
+            while (mui_is_valid_edit_char(value[i], string_flags) == 0)
+              value[i]++;
+            buf[0] = value[i];
+            buf[1] = '\0'; 
+          
+          }
+
+          //draw teh character at teh corect position, adding correct spacing for teh selected character
+          u8g2_DrawUTF8(u8g2, x + xOffset + ((i == pos)?2:0), y, buf);
+          
+          //draw teh selection frame on the selected character
+          if(i == pos)
+          {
+            u8g2_DrawButtonFrame(u8g2, x + xOffset + 1, y, draw_flags, u8g2_GetUTF8Width(u8g2,buf)+2, 0, MUI_U8G2_V_PADDING);
+          }
+          //setup offset to positoin next character
+          xOffset += u8g2_GetUTF8Width(u8g2,buf) + ((i == pos)?+5:1);
+        } 
+        break;
       }
-      break;
     default:
+      //in normal operation draw string as one, no need for additional calculations as not edint gthe string
       strncpy(buf,value,ui->arg);
-      mui_u8g2_draw_button_pi(ui, u8g2_GetStrWidth(u8g2, value) + 1, 1, buf);
+      mui_u8g2_draw_button_pi(ui, u8g2_GetUTF8Width(u8g2, value) + 1, 1, buf);
       break;
   }
 }
@@ -2310,6 +2362,8 @@ static void mui_u8g2_string_draw_wm(mui_t *ui)
     a character is selected, user can loop through all valid characters just as teh charcter 
     field does but ti also has a delete character to allow that character to be delted.
     At the very end of the string, a confirm button is shown to exit edit mode.
+
+    Requires a te or tf font to display correctly as the delete and enter are in the extended ascii range
 
   Message Handling: DRAW, SELECT, NEXT, PREVIOUS
 
@@ -2330,15 +2384,16 @@ uint8_t mui_u8g2_string_wm_mud_pi(mui_t *ui, uint8_t msg)
 
   u8g2_t *u8g2 = mui_get_U8g2(ui);
   mui_u8g2_string_t *string_data = (mui_u8g2_string_t *)muif_get_data(ui->uif);
-  char *value = mui_u8g2_string_get_valptr(string_data);
-  uint8_t max_length = mui_u8g2_string_get_max_length(string_data);
+  char *value = (char *)mui_u8g2_string_get_valptr(string_data);
+  uint8_t max_length = (uint8_t)mui_u8g2_string_get_max_length(string_data);
+  uint8_t string_flags = mui_u8g2_string_get_flags(string_data);
   uint8_t arg = ui->arg;
   int pos = (int)ui->token;
-  uint8_t char_width = u8g2_GetMaxCharWidth(u8g2);
   char buf[6];
   switch (msg)
   {
   case MUIF_MSG_DRAW:
+
     mui_u8g2_string_draw_wm(ui);
     break;
   case MUIF_MSG_FORM_START:
@@ -2350,49 +2405,62 @@ uint8_t mui_u8g2_string_wm_mud_pi(mui_t *ui, uint8_t msg)
   case MUIF_MSG_CURSOR_SELECT:
   case MUIF_MSG_VALUE_INCREMENT:
   case MUIF_MSG_VALUE_DECREMENT:
-    switch (ui->is_mud)
-    {
-      case 1:
-        //if the last position is selected, tehn editiing is done, exit and clean up
-        if(pos == strlen(value))
-        {
-          ui->is_mud = 0;
-          ui->form_scroll_total = 0;
-          ui->form_scroll_visible = 0;
-          ui->form_scroll_top = 0;
-          ui->token = 0;
-          value[strlen(value) - 1] = '\0';
-        }
-        //else enter character edit mode
-        else
-        {
-          ui->is_mud = 2;
-        }
-        break;
-      case 2:
-        //if characcter is set tot eh delete symbol. delete this character from the string.
-        //by shifting teh remaining characters over by one using a copy
-        if(value[pos] == '<')
-        {
-          strcpy(value+pos, value + pos +1);
-          ui->form_scroll_total = strlen(value)+1;
-        }
-        //if we are updating the last character, add a new space to teh end to allow a new character to be added
-        //this will be trimmed on exit
-        if(pos == ui->form_scroll_total - 2 && strlen(value) < max_length)
-        {
+    //check if its this field selected (allows multiple of these to be present on form)
+    if(mui_IsCursorFocus(ui))
+    { 
+ 
+      switch (ui->is_mud)
+      {
+        case 1:
+          //if the last position is selected, tehn editiing is done, exit and clean up
+          if(pos == strlen(value))
+          {
+            ui->is_mud = 0;
+            ui->form_scroll_total = 0;
+            ui->form_scroll_visible = 0;
+            ui->form_scroll_top = 0;
+            ui->token = 0;
+            value[strlen(value) - 1] = '\0';
+          }
+          //else enter character edit mode
+          else
+          {
+            ui->is_mud = 2;
+          }
+    
+          break;
+        case 2:
+          //if characcter is set to the delete symbol. delete this character from the string.
+          //by shifting the remaining characters over by one using a copy
+          
+          if(value[pos] == MUI_STRING_DELETE)
+          {
+            printf("'%s' %d %d\n",value, value+pos, value + pos +1);
+            memmove(&value[pos], &value[pos +1],strlen(value) - pos);
+            
+            printf("'%s'\n",value);
+          }
+          //if we are updating the last character, add a new space to teh end to allow a new character to be added
+          //this will be trimmed on exit
+
+          if(pos == ui->form_scroll_total-1 && strlen(value) < max_length)
+          {
+            strcat(value," ");
+          
+          }
+          //exit character edit mode
+          ui->form_scroll_total = strlen(value);
+          ui->is_mud = 1;
+          break;
+        default:
+          //enter edit mode ad setup variables to handle editing
+          ui->is_mud = 1;
           strcat(value," ");
-          ui->form_scroll_total = strlen(value)+1;
-        }
-        //exit character edit mode
-        ui->is_mud = 1;
-        break;
-      default:
-        ui->is_mud = 1;
-        strcat(value," ");
-        ui->form_scroll_total = strlen(value)+1;
-        ui->form_scroll_visible = arg+1;
-        break;
+          ui->form_scroll_total = strlen(value);
+          ui->form_scroll_visible = arg+1;
+
+          break;
+      }
     }
     break;
   case MUIF_MSG_CURSOR_LEAVE:
@@ -2402,30 +2470,34 @@ uint8_t mui_u8g2_string_wm_mud_pi(mui_t *ui, uint8_t msg)
   case MUIF_MSG_TOUCH_UP:
     break;
   case MUIF_MSG_EVENT_NEXT:
-    switch (ui->is_mud)
+    if(mui_IsCursorFocus(ui))
     {
-      case 1:
-        if(pos < strlen(value))
-        {
-          pos++;
-          ui->token = (fds_t *)pos;
-        }
-        if ( pos+1 >= ui->form_scroll_visible )
-        {
-          if ( ui->form_scroll_visible + ui->form_scroll_top < ui->form_scroll_total )
+     
+      switch (ui->is_mud)
+      {
+        case 1:
+          if(pos < ui->form_scroll_total)
           {
-            ui->form_scroll_top++;
+            pos++;
+            ui->token = (fds_t *)pos;
           }
-        }
-        return 1;
-      case 2:
-        do
-        {
-          value[pos]++;
-        } while (mui_is_valid_edit_char(value[pos]) == 0);
-        return 1;
-      default:
-        break;
+          if ( pos+1 >= ui->form_scroll_visible )
+          {
+            if ( ui->form_scroll_visible + ui->form_scroll_top < ui->form_scroll_total )
+            {
+              ui->form_scroll_top++;
+            }
+          }
+          return 1;
+        case 2:
+          do
+          {
+            value[pos]++;
+          } while (mui_is_valid_edit_char(value[pos], string_flags) == 0);
+          return 1;
+        default:
+          break;
+      }
     }
     break;
   case MUIF_MSG_EVENT_PREV:
@@ -2450,7 +2522,7 @@ uint8_t mui_u8g2_string_wm_mud_pi(mui_t *ui, uint8_t msg)
         do
         {
           value[pos]--;
-        } while (mui_is_valid_edit_char(value[pos]) == 0);
+        } while (mui_is_valid_edit_char(value[pos], string_flags) == 0);
         return 1;
       default:
         break;
